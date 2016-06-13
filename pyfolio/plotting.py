@@ -23,6 +23,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import matplotlib.lines as mlines
+from matplotlib import figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 from sklearn import preprocessing
 
@@ -1663,7 +1665,7 @@ def plot_prob_profit_trade(round_trips, ax=None):
 
 
 def plot_cone(aggregate_returns, bounds, ax,
-              cone_stds=(1, 1.5, 2.),
+              cone_std=(1, 1.5, 2.),
               color='green',):
     """
     Plots the upper and lower bounds of an n standard deviation
@@ -1692,7 +1694,7 @@ def plot_cone(aggregate_returns, bounds, ax,
     ax : matplotlib.Axes
         The axes that were plotted on.
     """
-    for std in cone_stds:
+    for std in cone_std:
         ax.fill_between(aggregate_returns.index,
                         bounds[float(std)].iloc[:len(aggregate_returns)],
                         bounds[float(-std)].iloc[:len(aggregate_returns)],
@@ -1701,7 +1703,8 @@ def plot_cone(aggregate_returns, bounds, ax,
 
 
 def plot_multistrike_cones(is_returns, oos_returns, num_samples=1000,
-                           name=None, ax=None):
+                           name=None, ax=None, cone_std=(1., 1.5, 2.),
+                           random_seed=None):
     """
     Plots the upper and lower bounds of an n standard deviation
     cone of forecasted cumulative returns. This cone is non-parametric,
@@ -1714,30 +1717,51 @@ def plot_multistrike_cones(is_returns, oos_returns, num_samples=1000,
         Non-cumulative in-sample returns.
     oos_returns : pandas.core.frame.DataFrame
         Non-cumulative out-of-sample returns.
+    num_samples : int
+        Number of samples to draw from the in-sample daily returns.
+        Each sample will be an array with length num_days.
+        A higher number of samples will generate a more accurate
+        bootstrap cone.
     name : str, optional
         Plot title
     ax : matplotlib.Axes, optional
         Axes upon which to plot.
+    cone_std : int, float, or list of int/float
+        Number of standard devations to use in the boundaries of
+        the cone. If multiple values are passed, cone bounds will
+        be generated for each value.
+    random_seed : int
+        Seed for the pseudorandom number generator used by the pandas
+        sample method.
+
 
     Returns
     -------
     ax : matplotlib.Axes
         The axes that were plotted on.
+    fig : matplotlib.figure
+        The figure instance which contains all the plot elements.
     """
     if ax is None:
-        ax = plt.subplot()
+        fig = figure.Figure(figsize=(10, 8))
+        FigureCanvasAgg(fig)
+        axes = fig.add_subplot(111)
+    else:
+        axes = ax
 
     aggregate_returns = timeseries.cum_returns(oos_returns, starting_value=1.)
     bounds = timeseries.forecast_cone_bootstrap(is_returns,
                                                 len(oos_returns),
-                                                num_samples=num_samples)
+                                                cone_std=cone_std,
+                                                num_samples=num_samples,
+                                                random_seed=random_seed)
     bounds.index = oos_returns.index
-    plot_cone(aggregate_returns, bounds, ax)
+    plot_cone(aggregate_returns, bounds, axes, cone_std=cone_std)
 
     bounds_cur = bounds.copy()
     cone_start = aggregate_returns.index[0]
 
-    aggregate_returns.plot(ax=ax,
+    aggregate_returns.plot(ax=axes,
                            lw=3.,
                            color='k',
                            label='Cumulative returns = {:.2f}%'.format(
@@ -1750,10 +1774,14 @@ def plot_multistrike_cones(is_returns, oos_returns, num_samples=1000,
             cone_start = crossing.loc[crossing].index[0]
             plot_cone(oos_returns.loc[cone_start:],
                       (bounds - (1 - aggregate_returns.loc[cone_start])),
-                      ax, color=c)
+                      axes, color=c)
             bounds_cur = (bounds - (1 - aggregate_returns.loc[cone_start]))
     if name is not None:
-        ax.set_title(name)
-    ax.axhline(1, color='k', alpha=0.2)
-    ax.legend()
-    return ax
+        axes.set_title(name)
+    axes.axhline(1, color='k', alpha=0.2)
+    axes.legend()
+
+    if ax is None:
+        return fig
+    else:
+        return axes
